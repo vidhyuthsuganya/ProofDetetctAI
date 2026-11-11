@@ -1,1 +1,2 @@
-streamlit>=1.35
+streamlit>=1.35.0
+sympy>=1.12
