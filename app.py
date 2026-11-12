@@ -55,19 +55,43 @@ RULES = {
 }
 
 def fmt(value):
+    """Return SymPy output as inline LaTeX for textbook-style display."""
     try:
         value = sp.simplify(value)
-        if value.is_Integer:
-            return str(value)
-        if value.is_Rational:
-            return str(value)
-        return sp.sstr(value)
+        return f"${sp.latex(value)}$"
     except Exception:
         return str(value)
 
+
+def normalise_math_input(raw):
+    """Convert common keyboard/mobile maths symbols into parser-friendly syntax."""
+    raw = raw.strip()
+    superscripts = str.maketrans({
+        "⁰": "0", "¹": "1", "²": "2", "³": "3", "⁴": "4",
+        "⁵": "5", "⁶": "6", "⁷": "7", "⁸": "8", "⁹": "9",
+    })
+    raw = raw.translate(superscripts)
+    # Turn x2 into x**2 only when the 2 is written as a superscript originally.
+    # (The superscript conversion above is followed by this targeted pattern.)
+    raw = raw.replace("√", "sqrt")
+    raw = raw.replace("−", "-").replace("×", "*").replace("÷", "/")
+    raw = raw.replace("π", "pi").replace("²", "**2").replace("³", "**3")
+    return raw
+
+
+def render_answer(status, answer, explanation, rule):
+    st.markdown(f"### {status}")
+    st.markdown(answer)
+    st.markdown(explanation)
+    if rule:
+        with st.expander("Mathematical rule used"):
+            st.write(rule["title"])
+            st.write(rule["rule"])
+            st.write(rule["why"])
+
 def safe_parse(raw):
     """Parse a maths expression using SymPy, with implicit multiplication (2x, 3(x+1))."""
-    raw = raw.strip().replace("−", "-").replace("×", "*").replace("÷", "/")
+    raw = normalise_math_input(raw)
     raw = raw.replace("^", "**")
     if not raw or len(raw) > 250:
         raise ValueError("Please enter a shorter mathematical expression.")
@@ -105,15 +129,15 @@ def solve_algebra(question):
         equation = sp.Eq(lhs, rhs)
         symbols = sorted(equation.free_symbols, key=lambda s: s.name)
         if not symbols:
-            return ("SOLVED", f"**{fmt(sp.simplify(lhs-rhs)) == '0'}**",
+            return ("SOLVED", f"**{sp.simplify(lhs-rhs) == 0}**",
                     f"Compare both sides: left side = {fmt(lhs)} and right side = {fmt(rhs)}.", None)
         target = x if x in symbols else symbols[0]
         solutions = sp.solve(equation, target)
         if not solutions:
             return ("NO SOLUTION FOUND", "I couldn't find a solution for this equation.", "Check that the equation was typed correctly.", None)
         steps = [
-            f"1. Start with: **{sp.sstr(lhs)} = {sp.sstr(rhs)}**",
-            f"2. Bring everything to one side: **{sp.sstr(sp.expand(lhs-rhs))} = 0**",
+            f"1. Start with: $${sp.latex(lhs)} = {sp.latex(rhs)}$$",
+            f"2. Bring everything to one side: $${sp.latex(sp.expand(lhs-rhs))} = 0$$",
             f"3. Solve for **{target}**."
         ]
         if len(solutions) == 1:
@@ -138,8 +162,8 @@ def solve_algebra(question):
     expr = safe_parse(expression)
     result = {"expand": sp.expand, "factor": sp.factor, "simplify": sp.simplify}[action](expr)
     label = {"expand": "Expanded form", "factor": "Factorised form", "simplify": "Simplified form"}[action]
-    return ("SOLVED", f"**{label}: {sp.sstr(result)}**",
-            f"Starting expression: **{sp.sstr(expr)}**\n\nAfter {action}ing: **{sp.sstr(result)}**", None)
+    return ("SOLVED", f"**{label}: {sp.latex(result)}**",
+            f"Starting expression: **{sp.latex(expr)}**\n\nAfter {action}ing: **{sp.latex(result)}**", None)
 
 def solve_question(q):
     s = q.lower().replace("°", " degrees ")
@@ -194,7 +218,7 @@ def solve_question(q):
             expr = safe_parse(candidate)
             result = sp.simplify(expr)
             return ("SOLVED", f"**Answer: {fmt(result)}**",
-                    f"Evaluated expression: **{sp.sstr(expr)} = {fmt(result)}**", None)
+                    f"Evaluated expression: **{sp.latex(expr)} = {fmt(result)}**", None)
         except Exception:
             pass
 
@@ -233,23 +257,18 @@ def check_step(given, claim, reason):
 st.title("📐 ProofDetect AI")
 st.caption("A free mathematics tutor and proof-checking learning assistant")
 
-st.info("ProofDetect AI is an evolving educational prototype. It can solve supported algebra, arithmetic and geometry questions, but it does not yet understand every possible question or independently verify every proof.")
+st.info("ProofDetect AI is an evolving educational prototype. It can solve supported algebra, arithmetic and geometry questions, display many answers in textbook-style maths notation, and check selected proof patterns. It does not yet understand every possible question or independently verify every proof.")
 
 grade = st.selectbox("Choose your grade range", ["Grades 1–2", "Grades 3–5", "Grades 6–8", "Grades 9–10", "Grades 11–12", "Explore any level"])
 mode = st.radio("What would you like to do?", ["Solve / explain a question", "Check a proof step", "Learn a mathematical rule", "Try an example"])
 
 if mode == "Solve / explain a question":
     st.subheader("Maths tutor")
-    q = st.text_area("Type your mathematical question", placeholder="Try: 2x + 3 = 6 + x, find x")
+    q = st.text_area("Type your mathematical question", placeholder="Try: 2x + 3 = 6 + x, find x  |  x² + 5x + 6 = 0")
     if st.button("Solve question", type="primary"):
         if q.strip():
             status, answer, explanation, rule = solve_question(q)
-            st.markdown(f"### {status}")
-            st.markdown(answer)
-            st.markdown(explanation)
-            if rule:
-                with st.expander("Mathematical rule used"):
-                    st.write(rule["title"]); st.write(rule["rule"]); st.write(rule["why"])
+            render_answer(status, answer, explanation, rule)
         else:
             st.warning("Please type a question first.")
 
@@ -288,9 +307,7 @@ else:
     st.code(examples[sample])
     if st.button("Run sample", type="primary"):
         status, answer, explanation, rule = solve_question(examples[sample])
-        st.markdown(f"### {status}"); st.markdown(answer); st.markdown(explanation)
-        if rule:
-            st.caption(f"Rule used: {rule['title']}")
+        render_answer(status, answer, explanation, rule)
 
 st.divider()
 st.caption("ProofDetect AI is free to try. For important work, verify answers and proof steps with a teacher or trusted textbook.")
